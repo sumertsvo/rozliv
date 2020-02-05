@@ -5,27 +5,28 @@
 #include <Q2HX711.h>
 #include <Keypad.h>
 #include <OLED_I2C.h>
+#include <EEPROM.h>
 //-------------------------------—
 //количество
 const byte KOLVO = 4;
 //время вертикалки
 const word T_VERT = 3000;
 //---------------------------------
-//пины датчиков
-Q2HX711 datch0(A9, A8);
-Q2HX711 datch1(A4, A5);
-Q2HX711 datch2(A2, A3);
-Q2HX711 datch3(A0, A1);
+//пины датчиков (dt,sck)
+Q2HX711 datch0(A0, A1);
+Q2HX711 datch1(A3, A2);
+Q2HX711 datch2(A5, A4);
+Q2HX711 datch3(A6, A7);
 //пины дисплеев (SDA,SCL)
-OLED scrn(20, 21);
+OLED scrn(13, 12);
 //пины реле
-const byte rele[KOLVO] = {7, 6, 5, 4};
+const byte rele[KOLVO] = {32, 34, 36, 38};
 //кнопка
-const byte VERT = 41;
-const unsigned long T_HEAT = 3000;
+const byte VERT = 40;
+const unsigned long T_HEAT = 300;
 //пины клавиатуры
-const byte rowPins[4] = {26 , 24, 22, 31};
-const byte colPins[4] = {34, 32, 30, 28} ;
+const byte rowPins[4] = {25, 27, 29, 31};
+const byte colPins[4] =  {17 , 19, 21, 23};
 //-------------------------------—
 //обьявления переменных
 byte rez = 0;//0-ожидание,1-налив,2-калибр,3-прогрев
@@ -36,6 +37,7 @@ int num;
 int znach[KOLVO] = {0, 0, 0, 0};
 int mas[KOLVO] = {0, 0, 0, 0};
 int k[KOLVO] = {0, 0, 0, 0};
+int ost[KOLVO] ={4, 54, 30, 24};
 boolean on[KOLVO] = {0, 0, 0, 0};
 float koef[KOLVO] = {0.8138379, 0.783257, 0.818425, 0.784786};
 int nol[KOLVO] = {0, 0, 0, 0};
@@ -58,6 +60,7 @@ Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, 4, 4 );
 
 
 void setup() {
+  Serial.begin(9600);
   //активация дисплеев
   initScreen(scrn);
   //активация реле
@@ -74,9 +77,18 @@ void setup() {
   nol[1] = znach[1];
   nol[2] = znach[2];
   nol[3] = znach[3];
+  koef[0] = EEPROM_float_read(0);
+  koef[1] = EEPROM_float_read(5);
+  koef[2] = EEPROM_float_read(10);
+  koef[3] = EEPROM_float_read(15);
+  for (byte i=0;i<5;i++){
+    Serial.println(koef[i]);
+  }
 }
 
 //======================================================================================
+//948 906 882 938
+//1538 1438 1414 1490
 
 void loop() {
   //переменые
@@ -121,22 +133,26 @@ void loop() {
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(0,koef[q]);
                 break;
 
               case 2:
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(5, koef[q]);
                 break;
               case 3:
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(10, koef[q]);
                 break;
               case 4:
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(15, koef[q]);
                 break;
               default:
                 rez = 0;
@@ -328,7 +344,7 @@ void stopFlow() {
 //======================================================================================
 //процедура просчёта релешек
 void ves(int i) {
-  mas[i] = (znach[i] - (nol[i] + k[i])) / koef[i]; //в конце нужный коэф
+  mas[i] = (znach[i] - (nol[i] + k[i]-ost[i])) / koef[i]; //в конце нужный коэф
 }
 
 //======================================================================================
@@ -336,3 +352,18 @@ void ves(int i) {
 void readZnach(Q2HX711 & datch, int i) {
   znach[i] = (int(datch.read() / 1000));
 }
+//======================================================================================
+void EEPROM_float_write(int addr, float val) // запись в ЕЕПРОМ
+{  
+  byte *x = (byte *)&val;
+  for(byte i = 0; i < 4; i++) EEPROM.write(i+addr, x[i]);
+}
+//======================================================================================
+float EEPROM_float_read(int addr) // чтение из ЕЕПРОМ
+{    
+  byte x[4];
+  for(byte i = 0; i < 4; i++) x[i] = EEPROM.read(i+addr);
+  float *y = (float *)&x;
+  return y[0];
+}
+//======================================================================================
