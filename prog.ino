@@ -1,7 +1,6 @@
 /*
-рабочий варик на 4 датчика
-*/
-//Подключаем библиотеки
+рабочий варик на 3 датчика
+*///Подключаем библиотеки
 #include <Q2HX711.h>
 #include <Keypad.h>
 #include <OLED_I2C.h>
@@ -14,7 +13,6 @@ const int goriz = 3000;//время горизонталки
 Q2HX711 hx7110(A7, A6);
 Q2HX711 hx7111(A5, A4);
 Q2HX711 hx7112(A3, A2);
-Q2HX711 hx7113(A1, A0);
 //-------------------------------—
 //пины дисплеев (SDA,SCL)
 OLED myOLED0(20, 21);
@@ -84,13 +82,12 @@ void loop() {
 
   if (zdem) {
 
-if (digitalRead(rele[0]) == 0 || digitalRead(rele[1]) == 0 || digitalRead(rele[2]) == 0 || digitalRead(rele[3]) == 0)
+if (digitalRead(rele[0]) == 0 || digitalRead(rele[1]) == 0 || digitalRead(rele[2]) == 0)
   {
-    ves(hx7110, 0);
+ves(hx7110, 0);
 ves(hx7111, 1);
 ves(hx7112, 2);
-    ves(hx7113, 3);
-  }
+    }
     //кнопка
     if (digitalRead(knop) == HIGH && flag == 0) //если кнопка нажата
       // и перемення flag равна 0 , то ...
@@ -99,7 +96,7 @@ ves(hx7112, 2);
       //это нужно для того что бы с каждым нажатием кнопки
       //происходило только одно действие
       // плюс защита от "дребезга" 100%
-      for (byte i = 0; i < 4; i++) {
+      for (byte i = 0; i < 3; i++) {
         mas[i] = 0;
         k[i] =  0;
         on[i] = 0;
@@ -114,7 +111,6 @@ ves(hx7112, 2);
       k[0] = int(hx7110.read() / 1000) - nol[0];
       k[1] = int(hx7111.read() / 1000) - nol[1];
       k[2] = int(hx7112.read() / 1000) - nol[2];
-      k[3] = int(hx7113.read() / 1000) - nol[3];
       Serial.println("тара сброшена");
       delay(100);
 
@@ -122,7 +118,6 @@ ves(hx7112, 2);
       digitalWrite(rele[0], 0);
       digitalWrite(rele[1], 0);
       digitalWrite(rele[2], 0);
-      digitalWrite(rele[3], 0);
       zdem = 0;
     }
     if (digitalRead(knop) == LOW && flag == 1) //если кнопка НЕ нажата
@@ -182,8 +177,7 @@ ves(hx7112, 2);
     on[0] = ves(hx7110, 0);
     on[1] = ves(hx7111, 1);
     on[2] = ves(hx7112, 2);
-    on[3] = ves(hx7113, 3);
-    if (on[0] && on[1] &&    on[2] && on[3])
+    if (on[0] && on[1] &&    on[2] )
     {
       digitalWrite(rele[6], 1);
       Serial.println("готово");
