@@ -1,66 +1,53 @@
 /*
-  модульный варик на 4 датчика
+  лайт модульный варик на 4 датчика
 */
 //Подключаем библиотеки
 #include <Q2HX711.h>
 #include <Keypad.h>
 #include <OLED_I2C.h>
+#include <EEPROM.h>
 //-------------------------------—
-
-//разница массы насоса
-const int DM_NASOS = 1;
+#define T_Ser 0
+//--------------------------------
 //количество
 const byte KOLVO = 4;
-
-//включение отладки
-boolean TEST = false;//общий тест
-boolean KTEST = false;//тест кнопок
-boolean VTEST = false;//тест процедуры ves
-boolean STEST = false;//тест самих сенсоров
-boolean CTEST = false;//тест калибровки
-boolean NTEST = false;//тест налива
-boolean HTEST = false;//тест прогрева
-
 //время вертикалки
-const word T_VERT = 3000;
-//время горизонталки
-const word T_GORIZ = 1;
-//---------------------------------
-
-//пины датчиков
-Q2HX711 datch0(A9, A8);
-Q2HX711 datch1(A4, A5);
-Q2HX711 datch2(A2, A3);
-Q2HX711 datch3(A0, A1);
-//пины дисплеев (SDA,SCL)
-OLED scrn(20, 21);
-//пины реле
-const byte rele[KOLVO] = {7, 6, 5, 4};
-//кнопка
-const byte GORIZ = 39;
-const byte VERT = 41;
-const byte NASOS = 43;
-const unsigned long T_HEAT = 3000;
-//пины клавиатуры
-const byte rowPins[4] = {26 , 24, 22, 31};
-const byte colPins[4] = {34, 32, 30, 28} ;
+const word T_VERT = 333;
 //-------------------------------—
-
+//пины датчиков (dt,sck)
+Q2HX711 datch0(A0, A1);
+Q2HX711 datch1(A4, A5);
+Q2HX711 datch2(A8, A9);
+Q2HX711 datch3(A12, A13);
+//пины дисплеев (SDA,SCL)
+OLED scrn(SDA, SCL);
+//пины реле
+const byte rele[KOLVO] = {43, 40, 38, 39};
+//защита
+const int stoptime = 5000;
+const int stopves = 10;
+//инверсия реле
+const boolean inv = 0;
+//кнопка
+const byte VERT = 40;
+const unsigned long T_HEAT = 300;
+//пины клавиатуры
+const byte rowPins[4] = {30, 31, 32, 33};
+const byte colPins[4] = {34, 35, 36, 37} ;
+//-------------------------------—
 //обьявления переменных
 byte rez = 0;//0-ожидание,1-налив,2-калибр,3-прогрев
-byte stg = 0;//
+byte stg = 0;
 unsigned long starttime;
-
-
-String str, msg;
+String str;
 int num;
 int znach[KOLVO] = {0, 0, 0, 0};
 int mas[KOLVO] = {0, 0, 0, 0};
+int masold[KOLVO] = {0, 0, 0, 0};
 int k[KOLVO] = {0, 0, 0, 0};
+int ost[KOLVO] = {4, 54, 30, 24};
 boolean on[KOLVO] = {0, 0, 0, 0};
-//коэф расчета
 float koef[KOLVO] = {0.8138379, 0.783257, 0.818425, 0.784786};
-//коэффициенты 0
 int nol[KOLVO] = {0, 0, 0, 0};
 
 //-------------------------------—
@@ -68,26 +55,23 @@ int nol[KOLVO] = {0, 0, 0, 0};
 //ненужные настройки
 extern uint8_t BigNumbers[];
 extern uint8_t SmallFont[];
-char keys[4][4] = {
+const char keys[4][4] = {
   {'1', '2', '3', 'A'},
   {'4', '5', '6', 'B'},
   {'7', '8', '9', 'C'},
   {'*', '0', '#', 'D'}
 };
+
 Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, 4, 4 );
-//---------------------------------------—
 
-
-//======================================================================================
 //======================================================================================
 //======================================================================================
 
 
 void setup() {
-  //отладочное
+#if (T_Ser>0)
   Serial.begin(9600);
-  //-------------------------------—
-  if (TEST) Serial.print("start");
+#endif
   //активация дисплеев
   initScreen(scrn);
   //активация реле
@@ -104,10 +88,15 @@ void setup() {
   nol[1] = znach[1];
   nol[2] = znach[2];
   nol[3] = znach[3];
+  koef[0] = EEPROM_float_read(0);
+  koef[1] = EEPROM_float_read(5);
+  koef[2] = EEPROM_float_read(10);
+  koef[3] = EEPROM_float_read(15);
 }
 
-
 //======================================================================================
+//948 906 882 938
+//1538 1438 1414 1490
 
 void loop() {
   //переменые
@@ -119,8 +108,6 @@ void loop() {
   readZnach(datch1, 1);
   readZnach(datch2, 2);
   readZnach(datch3, 3);
-  if (TEST) Serial.print("rez=");
-  if (TEST) Serial.println(rez);
   switch (rez) {
     //налив
     //==================================================================================
@@ -128,32 +115,9 @@ void loop() {
       for (byte i = 0; i < KOLVO; i++) {
         ves(i);
       }
-      if (dm() >= DM_NASOS) {
-        if (updateRele()) {
-          if (NTEST) Serial.println("flow");
-        }
-        else {
-          if (NTEST) Serial.println("stop flow");
-          stopFlow();
-          rez = 0;
-        }
-      }
-      else {
-        digitalWrite(NASOS, 0);
-        if (NTEST) Serial.println("nasos vkl");
-      }
-      if (NTEST) {
-        for (byte i = 0; i < KOLVO; i++) {
-          Serial.print("rel_");
-          Serial.println(i + 1);
-          if (on[i])
-            Serial.println("on");
-          else Serial.println("off");
-        }
-        Serial.print("dm=");
-        Serial.println(dm());
-        Serial.print("DM_NASOS=");
-        Serial.println(DM_NASOS);
+      if (!updateRele()) {
+        stopFlow();
+        rez = 0;
       }
       refreshScreen(scrn, num, "Flow");
       break;
@@ -164,10 +128,9 @@ void loop() {
       //считывание клавиатуры
       key = keypad.getKey();
       if (key) {
-        if (KTEST) Serial.println(key); // Передаем нажатую клавишу в сериал порт (отладочное)
         switch (key) {
           case 'A':
-          stg = 5;
+            stg = 5;
             break;
           case 'B':
             stg++;
@@ -178,22 +141,26 @@ void loop() {
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(0, koef[q]);
                 break;
 
               case 2:
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(5, koef[q]);
                 break;
               case 3:
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(10, koef[q]);
                 break;
               case 4:
                 q = stg - 1;
                 mas[q] = znach[q];
                 koef[q] = (float(mas[q] - nol[q]) / m_calibr);
+                EEPROM_float_write(15, koef[q]);
                 break;
               default:
                 rez = 0;
@@ -205,7 +172,7 @@ void loop() {
             break;
           case 'C':
             stg = 0;
-                for (byte i = 0; i < KOLVO; i++) {
+            for (byte i = 0; i < KOLVO; i++) {
               mas[i] = 0;
             }
             break;
@@ -227,34 +194,6 @@ void loop() {
             break;
         }
       }
-      if (CTEST) {
-        Serial.print("m_calibr=");
-        Serial.println(m_calibr);
-        Serial.print("mas1=");
-        Serial.println(mas[0]);
-        Serial.print("nol1=");
-        Serial.println(nol[0]);
-        Serial.print("koef1=");
-        Serial.println(koef[0]);
-        Serial.print("mas2=");
-        Serial.println(mas[1]);
-        Serial.print("nol2=");
-        Serial.println(nol[1]);
-        Serial.print("koef2=");
-        Serial.println(koef[1]);
-        Serial.print("mas3=");
-        Serial.println(mas[2]);
-        Serial.print("nol3=");
-        Serial.println(nol[2]);
-        Serial.print("koef3=");
-        Serial.println(koef[2]);
-        Serial.print("mas4=");
-        Serial.println(mas[3]);
-        Serial.print("nol4=");
-        Serial.println(nol[3]);
-        Serial.print("koef4=");
-        Serial.println(koef[3]);
-      }
       if (stg == 0) {
         refreshScreen(scrn, m_calibr, "Calibr. mas:");
       }
@@ -266,7 +205,6 @@ void loop() {
     //прогрев
     //==================================================================================
     case 3:
-      if (HTEST) Serial.println(millis());
       if (millis() < T_HEAT) {
         refreshScreen(scrn, 0, "Heat");
       } else {
@@ -280,7 +218,6 @@ void loop() {
       //считывание клавиатуры
       key = keypad.getKey();
       if (key) {
-        if (KTEST) Serial.println(key); // Передаем нажатую клавишу в сериал порт (отладочное)
         switch (key) {
           case 'A':
             rez = 2;
@@ -304,7 +241,7 @@ void loop() {
             num = 0;
             for (byte i = 0; i < KOLVO; i++) {
               mas[i] = 0;
-              k[i] =  0;
+              k[i] = 0;
               on[i] = 0;
             }
             break;
@@ -315,39 +252,27 @@ void loop() {
             nol[2] = znach[2];
             nol[3] = znach[3];
             break;
-
           case '*':
             break;
-
           case '#':
             break;
-
           default:
             str = str + key;
             num = str.toInt();
             break;
         }
       }
-      //-------------------------------—
-      if (TEST)Serial.println(' ');
       //обновление экранов
       refreshScreen(scrn, num, "Wait");
       //-------------------------------—
   }
 }
 
-
-
 //======================================================================================
-//======================================================================================
-//======================================================================================
-
-
 //======================================================================================
 
 //процедура обновления экранов
 void refreshScreen(OLED & myOLED, int i, String s) {
-  if (TEST) Serial.print("refreshScreen");
   myOLED.clrScr();
   myOLED.setFont (BigNumbers);
   myOLED.printNumI(i, CENTER, 30);
@@ -360,7 +285,6 @@ void refreshScreen(OLED & myOLED, int i, String s) {
 
 //процедура активации экранов
 void initScreen(OLED & myOLED) {
-  if (TEST) Serial.print("initScreen");
   myOLED.begin();
   myOLED.clrScr();
   myOLED.setFont(BigNumbers);
@@ -370,122 +294,109 @@ void initScreen(OLED & myOLED) {
 
 //процедура активации реле
 void initRele() {
-  if (TEST) Serial.print("initRele");
-  pinMode(GORIZ, OUTPUT);
-  digitalWrite(GORIZ, 1);
   pinMode(VERT, OUTPUT);
-  digitalWrite(VERT, 1);
-  pinMode(NASOS, OUTPUT);
-  digitalWrite(NASOS, 1);
+  digitalWrite(VERT, inv);
+  delay(500);
   for (byte i = 0; i < KOLVO; i++) {
     pinMode(rele[i], OUTPUT);
-    digitalWrite(rele[i], 1);
+    digitalWrite(rele[i], inv);
+    delay (500);
   }
 }
 
 //======================================================================================
 
+
 //процедура переключения реле
-boolean updateRele() {
-  if (TEST) Serial.print("updateRele");
-  boolean buf = false;
+int updateRele() {
+  int buf = false;
+
+
   for (byte i = 0; i < KOLVO; i++) {
-    digitalWrite(rele[i], !on[i]);
+    int delta = num - mas[i];
+
+	
+    if (delta <= 0) //or (( millis() - starttime >= stoptime) && (mas[i] <= masold[i] + 50) )) 
+		on[i] = 0;
+    if (inv) {
+      digitalWrite(rele[i], !on[i]);
+    }
+    else {
+      digitalWrite(rele[i], on[i]);
+    }
+
+    if ( millis() - starttime >= stoptime)
+    {
+      masold[i] = mas[i];
+    }
+
     buf += on[i];
+  }
+  if ( millis() - starttime >= stoptime)
+  {
+    starttime = millis();
   }
   return buf;
 }
 
-//======================================================================================
 
-//процедура для насоса
-int dm() {
-  if (TEST) Serial.print("dm");
-  static int delta[KOLVO] = {0, 0, 0, 0};
-  int dx = 0;
-  for (byte i = 0; i < KOLVO; i++) {
-    delta[i] = num - mas[i];
-    if (delta[i] <= 0)  on[i] = 0;
-  }
-  for (byte i = 0; i < KOLVO; i++) {
-    dx += delta[i];
-  }
-  return dx;
-}
 
 //======================================================================================
 
 //процедура пуска
 void startFlow() {
-  if (TEST) Serial.print("startFlow");
   for (byte i = 0; i < KOLVO; i++) {
     mas[i] = 0;
-    k[i] =  0;
+    k[i] = 0;
     on[i] = 1;
   }
-  digitalWrite(GORIZ, 0);
-  delay(T_GORIZ);//горизонтальная задержка
-  if (NTEST) Serial.println("gorizont na meste");
-  digitalWrite(VERT, 0);
+  digitalWrite(VERT, !inv);
   delay(T_VERT);//вертикальная задержка
-  if (NTEST) Serial.println("vertical na meste");
   //сброс тары
   k[0] = znach[0] - nol[0];
   k[1] = znach[1] - nol[1];
   k[2] = znach[2] - nol[2];
   k[3] = znach[3] - nol[3];
-  if (NTEST) Serial.println("tara sbroshena");
+  starttime = millis();
   for (byte i = 0; i < KOLVO; i++) {
-    digitalWrite(rele[i], 0);
+    digitalWrite(rele[i], !inv);
+    delay(100);
   }
-  if (NTEST) Serial.println("rele vkluch");
+  delay(100);
 }
 
 //======================================================================================
 
 //процедура завершения
 void stopFlow() {
-  if (TEST) Serial.print("stopFlow");
-  digitalWrite(NASOS, 1);
-  if (NTEST)   Serial.println("nasos vikl");
-  digitalWrite(VERT, 1);
+  digitalWrite(VERT, inv);
   delay(T_VERT);
-  if (NTEST)   Serial.println("vertical ubrana");
-  digitalWrite(GORIZ, 1);
-  delay(T_GORIZ);
-  if (NTEST)   Serial.println("gorizont ubran");
 }
 
 //======================================================================================
 //процедура просчёта релешек
 void ves(int i) {
-  mas[i] = (znach[i] - (nol[i] + k[i])) / koef[i]; //в конце нужный коэф
-  if (VTEST) {
-    Serial.print("pokazaniya=");
-    Serial.println(znach[i]);
-    Serial.print("mass=");
-    Serial.println(mas[i]);//масса с учетом тары и т.п.
-    Serial.print("zadanniy ves=");
-    Serial.println(num);
-    Serial.print("nulevaya otmetka=");
-    Serial.println(nol[i]);
-    Serial.print("tara=");
-    Serial.println(k[i]);
-    Serial.print("koeff.=");
-    Serial.println(koef[i]);
-    if (on[i]) Serial.print("=on");
-    else Serial.print("=off");
-    Serial.println( );
-  }
+  mas[i] = (znach[i] - (nol[i] + k[i] - ost[i])) / koef[i]; //в конце нужный коэф
 }
 
 //======================================================================================
-//процедура просчёта релешек
+//процедура чтения значения датчика
 void readZnach(Q2HX711 & datch, int i) {
   znach[i] = (int(datch.read() / 1000));
-  if (STEST) {
-    Serial.print("pokazanie_");
-    Serial.println(i + 1);
-    Serial.println(znach[i]);
-  }
 }
+//======================================================================================
+void
+EEPROM_float_write(int addr, float val) // запись в ЕЕПРОМ
+{
+  byte *x = (byte *)&val;
+  for (byte i = 0; i < 4; i++) EEPROM.write(i + addr, x[i]);
+}
+//======================================================================================
+float EEPROM_float_read(int addr) // чтение из ЕЕПРОМ
+{
+  byte x[4];
+  for (byte i = 0; i < 4; i++) x[i] = EEPROM.read(i + addr);
+  float *y = (float *)&x;
+  return y[0];
+}
+//======================================================================================
